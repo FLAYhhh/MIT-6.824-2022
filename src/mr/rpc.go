@@ -20,6 +20,7 @@ type GetTasksArgs struct {
 const MAP_TYPE = "MAP"
 const REDUCE_TYPE = "REDUCE"
 const SHUTDOWN_TYPE = "SHUTDOWN"
+const WAIT_TYPE = "WAIT"
 
 type GetTasksReply struct {
 	task_type string, // Must be consistent with RPC server, 2 types: MAP_TYPE and REDUCE_TYPE

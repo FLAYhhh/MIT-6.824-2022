@@ -51,6 +51,8 @@ func Worker(mapf func(string, string) []KeyValue,
 				do_map_task(mapf, task_info)
 			case REDUCE_TYPE:
 				do_reduce_task(reducef, task_info)
+			case WAIT_TYPE:
+				// TODO: sleep
 			case SHUTDOWN_TYPE:
 				break;
 		}
@@ -173,6 +175,9 @@ func CallGetTasks() GetTasksReply {
 			fmt.Printf(" | reduce ID: %v | nMap: %v\n", reply.task_id, reply.nMap);
 		} else if reply.task_type == SHUTDOWN_TYPE {
 			fmt.Printf("\nbye\n");
+		} else if reply.task_type == WAIT_TYPE {
+			fmt.Printf("\nwait...\n");
+			// TODO: sleep
 		}
 	} else {
 		fmt.Printf("call failed!\n")
