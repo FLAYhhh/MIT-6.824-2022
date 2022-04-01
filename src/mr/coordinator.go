@@ -1,34 +1,36 @@
 package mr
 
+import "fmt"
 import "log"
 import "net"
 import "os"
 import "net/rpc"
 import "net/http"
+import "sync"
 
 
 type Coordinator struct {
 	// Your definitions here.
-	input_files []string,
-	nReduce int,
+	input_files []string
+	nReduce int
 
 	map_alloc_mu sync.Mutex
-	map_alloc map[int]bool
+	map_alloc []bool
 
 	reduce_alloc_mu sync.Mutex
-	reduce_alloc map[int]bool
+	reduce_alloc []bool
 
 	task_done_mu sync.Mutex
-	map_done map[int]bool, // In this design, task is identified by file name
-	reduce_done map[int]bool,  // reducer is identified by index
+	map_done []bool // In this design, task is identified by file name
+	reduce_done []bool  // reducer is identified by index
 
 	start_reduce_mu sync.Mutex
 	start_reduce bool
-	start_reduce_cond &sync.Cond
+	start_reduce_cond *sync.Cond
 
 	// all jobs are finshed
 	finish_mu sync.Mutex
-	finish_cond &sync.Cond
+	finish_cond *sync.Cond
 	finish bool
 }
 
@@ -37,39 +39,47 @@ type Coordinator struct {
 // RPC handler: GetTasks
 // FIXME: fault tolerance
 func (c *Coordinator) GetTasks(args *GetTasksArgs, reply *GetTasksReply) error {
-	c.done_mu.lock()
-	defer c.done_mu.unlock()
-	if done {
-		reply.task_type = SHUTDOWN_TYPE
+	c.finish_mu.Lock()
+	defer c.finish_mu.Unlock()
+	if c.finish {
+		reply.Task_type = SHUTDOWN_TYPE
 		return nil
 	}
 
-	c.start_reduce_mu.lock()
-	defer c.start_reduce_mu.unlock()
+	c.start_reduce_mu.Lock()
+	defer c.start_reduce_mu.Unlock()
 
-	reply.nReduce = c.nReduce
-	reply.nMap = len(c.input_files)
-	reply.task_type = WAIT_TYPE
+	reply.NReduce = c.nReduce
+	reply.NMap = len(c.input_files)
+	reply.Task_type = WAIT_TYPE
 	if !c.start_reduce {  // alloc Map task
-		c.map_alloc_mu.lock()
-		defer c.map_alloc_mu.unlock()
+		fmt.Println("Have unfinished Map task")
+		c.map_alloc_mu.Lock()
+		defer c.map_alloc_mu.Unlock()
 
-		for i, alloc : range c.map_alloc {
+		for i, alloc := range c.map_alloc {
 			if !alloc {
-				reply.task_type = MAP_TYPE
-				reply.task_id = i
-				reply.file_name = input_files[i]
+				reply.Task_type = MAP_TYPE
+				reply.Task_id = i
+				reply.File_name = c.input_files[i]
+				c.map_alloc[i] = true
+				fmt.Printf("Alloc Map task: ID = %v, File_name = %v\n", i, reply.File_name)
+				break
 			}
 		}
 		// TODO: if map tasks are allocated
 	} else {  // alloc Reduce task
-		c.reduce_alloc_mu.lock()
-		defer c.reduce_alloc_mu.lock()
+		fmt.Println("Have unfinished Recuduce task")
+		c.reduce_alloc_mu.Lock()
+		defer c.reduce_alloc_mu.Unlock()
 
-		for i, alloc : range c.reduce_alloc {
+		for i, alloc := range c.reduce_alloc {
 			if !alloc {
-				reply.task_type = REDUCE_TYPE
-				reply.task_id = i
+				reply.Task_type = REDUCE_TYPE
+				reply.Task_id = i
+				c.reduce_alloc[i] = true
+				fmt.Printf("Alloc Reduce task: ID = %v\n", i);
+				break
 			}
 		}
 	}
@@ -79,38 +89,38 @@ func (c *Coordinator) GetTasks(args *GetTasksArgs, reply *GetTasksReply) error {
 
 // RPC handler: TaskDone
 func (c *Coordinator) TaskDone(args *TaskDoneArgs, reply *TaskDoneReply) error {
-	task_type := args.task_type
-	id := args.task_id
+	Task_type := args.Task_type
+	id := args.Id
 
-	task_done_mu.lock()
-	defer task_done_mu.unlock()
-	if task_type == MAP_TYPE {
+	c.task_done_mu.Lock()
+	defer c.task_done_mu.Unlock()
+	if Task_type == MAP_TYPE {
 		// check map_done[] and possibly set shart_reduce
 		c.map_done[id] = true
 
 		all_done := true
-		for _, done : c.map_done {
+		for _, done := range c.map_done {
 			if !done {
 				all_done = false
 			}
 		}
 		if all_done {
-			c.start_reduce_mu.lock()
-			defer c.start_reduce_mu.unlock()
+			c.start_reduce_mu.Lock()
+			defer c.start_reduce_mu.Unlock()
 			c.start_reduce = true;
 		}
-	} else if task_type == REDUCE_TYPE {
+	} else if Task_type == REDUCE_TYPE {
 		// check reduce_done[] and possibly set finish
 		c.reduce_done[id] = true
 
 		all_done := true
-		for _, done : c.reduce_done {
+		for _, done := range c.reduce_done {
 			if !done {
 				all_done = false
 			}
 		}
 		if all_done {
-			c.finish.signal()
+			c.finish_cond.Signal()
 		}
 	} // else do nothing
 
@@ -141,7 +151,9 @@ func (c *Coordinator) Done() bool {
 	ret := false
 
 	// Your code here.
-	c.finish_cond.wait()
+	c.finish_mu.Lock()
+	c.finish_cond.Wait()
+	c.finish = true
 	ret = true
 
 	return ret
@@ -166,19 +178,19 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	//     But how to measure the time?
 	//     Sol: set a Done flag with each work, using a thread to check whether it's finished after 10s.
 
-	in_len = len(files)
+	in_len := len(files)
 	c.input_files = files
 
-	c.map_alloc = make(map[int]bool, in_len)
-	c.map_done = make(map[int]bool, in_len)
+	c.map_alloc = make([]bool, in_len)
+	c.map_done = make([]bool, in_len)
 
-	c.reduce_alloc = make(map[int]bool, nReduce)
-	c.reducer_done = make(map[int]bool, nReduce)
+	c.reduce_alloc = make([]bool, nReduce)
+	c.reduce_done = make([]bool, nReduce)
 
 	c.nReduce = nReduce
-	c.start_reduce_cond = sync.NewCond(c.start_reduce_mu)
+	c.start_reduce_cond = sync.NewCond(&c.start_reduce_mu)
 
-	c.finish_cond = sync.NewCond(c.finish_mu)
+	c.finish_cond = sync.NewCond(&c.finish_mu)
 
 	c.server()
 	return &c

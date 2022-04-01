@@ -4,10 +4,15 @@ import "fmt"
 import "log"
 import "net/rpc"
 import "hash/fnv"
+import "os"
+import "sort"
+import "io/ioutil"
+import "encoding/json"
+import "time"
 
 
 // for sorting by key.
-type ByKey []mr.KeyValue
+type ByKey []KeyValue
 
 // for sorting by key.
 func (a ByKey) Len() int           { return len(a) }
@@ -46,13 +51,14 @@ func Worker(mapf func(string, string) []KeyValue,
 	// 1. use RPC to get tasks
 	for {
 		task_info := CallGetTasks()
-		switch task_info.task_type {
+		switch task_info.Task_type {
 			case MAP_TYPE:
 				do_map_task(mapf, task_info)
 			case REDUCE_TYPE:
 				do_reduce_task(reducef, task_info)
 			case WAIT_TYPE:
 				// TODO: sleep
+				time.Sleep(time.Second)
 			case SHUTDOWN_TYPE:
 				break;
 		}
@@ -65,12 +71,12 @@ func do_reduce_task(reducef func(string, []string) string,
 	task_info GetTasksReply) {
 
 	// DONE: read mr-<*>-<id>
-	id = task_info.task_id
-	nMap = task_info.nMap
+	id := task_info.Task_id
+	nMap := task_info.NMap
 
-	kva := []mr.KeyValue{}
+	kva := []KeyValue{}
 	for i := 0; i < nMap; i++ {
-		filename := fmt.Sprint("mr-%d-%d", i, id)
+		filename := fmt.Sprintf("mr-%v-%v", i, id)
 		file, err := os.Open(filename)
 		if err != nil {
 			log.Fatalf("cannot open %v", filename)
@@ -90,7 +96,7 @@ func do_reduce_task(reducef func(string, []string) string,
 
 	sort.Sort(ByKey(kva))
 
-	oname := fmt.Sprint("mr-out-%d", id)
+	oname := fmt.Sprintf("mr-out-%v", id)
 	ofile, _ := os.Create(oname)
 
 	//
@@ -120,15 +126,16 @@ func do_reduce_task(reducef func(string, []string) string,
 func do_map_task(mapf func(string, string) []KeyValue,
 		task_info GetTasksReply) {
 
-	nReduce = task_info.nReduce
-	id = task_info.task_id
+	nReduce := task_info.NReduce
+	id := task_info.Task_id
 	//
 	// read input file,
 	// pass it to Map,
 	// accumulate the intermediate Map output.
 	//
-	intermediates := make([][]mr.KeyValue, nReduce)
+	intermediates := make([][]KeyValue, nReduce)
 
+	filename := task_info.File_name
 	file, err := os.Open(filename)
 	if err != nil {
 		log.Fatalf("cannot open %v", filename)
@@ -140,18 +147,18 @@ func do_map_task(mapf func(string, string) []KeyValue,
 	file.Close()
 	kva := mapf(filename, string(content))
 
-	for _, kv : range kva {
-		which_reducer = ihash(kv.Key) % nReduce
+	for _, kv := range kva {
+		which_reducer := ihash(kv.Key) % nReduce
 		intermediates[which_reducer] = append(intermediates[which_reducer], kv)
 	}
 
 	for i := 0; i < nReduce; i++ {
-		oname = fmt.Sprint("mr-%d-%d", id, i)
+		oname := fmt.Sprintf("mr-%v-%v", id, i)
 		// FIXME: use tmp file and rename
 		ofile, _ := os.Create(oname)
 		// TODO: write intermedaites[i] to mr-<map_id>-<i>
 		enc := json.NewEncoder(ofile)
-		for _, kv := intermediates[i] {
+		for _, kv := range intermediates[i] {
 			err := enc.Encode(&kv)
 			if err != nil {
 				log.Fatalf("encode err! kv: %v\n", kv)
@@ -167,15 +174,15 @@ func CallGetTasks() GetTasksReply {
 	ok := call("Coordinator.GetTasks", &args, &reply)
 	if ok {
 		// reply.Y should be 100.
-		fmt.Printf("Get Task | type: %v", reply.task_type)
-		if reply.task_type == MAP_TYPE {
+		fmt.Printf("Get Task | type: %v", reply.Task_type)
+		if reply.Task_type == MAP_TYPE {
 			fmt.Printf(" | map ID: %v | input file: %v | nReduce: %v\n",
-				reply.task_id, reply.file_name, reply.nReduce);
-		} else if reply.task_type == REDUCE_TYPE {
-			fmt.Printf(" | reduce ID: %v | nMap: %v\n", reply.task_id, reply.nMap);
-		} else if reply.task_type == SHUTDOWN_TYPE {
+				reply.Task_id, reply.File_name, reply.NReduce);
+		} else if reply.Task_type == REDUCE_TYPE {
+			fmt.Printf(" | reduce ID: %v | nMap: %v\n", reply.Task_id, reply.NMap);
+		} else if reply.Task_type == SHUTDOWN_TYPE {
 			fmt.Printf("\nbye\n");
-		} else if reply.task_type == WAIT_TYPE {
+		} else if reply.Task_type == WAIT_TYPE {
 			fmt.Printf("\nwait...\n");
 			// TODO: sleep
 		}
@@ -190,41 +197,12 @@ func CallTaskDone(task_info GetTasksReply) {
 	args := TaskDoneArgs{}
 	reply := TaskDoneReply{}
 
-	args.id = task_info.task_id
-	args.task_type = task_info.task_type
+	args.Id = task_info.Task_id
+	args.Task_type = task_info.Task_type
 
 	ok := call("Coordinator.TaskDone", &args, &reply)
 	if ok {
 		fmt.Printf("inform coordinator success\n")
-	} else {
-		fmt.Printf("call failed!\n")
-	}
-}
-
-//
-// example function to show how to make an RPC call to the coordinator.
-//
-// the RPC argument and reply types are defined in rpc.go.
-//
-func CallExample() {
-
-	// declare an argument structure.
-	args := ExampleArgs{}
-
-	// fill in the argument(s).
-	args.X = 99
-
-	// declare a reply structure.
-	reply := ExampleReply{}
-
-	// send the RPC request, wait for the reply.
-	// the "Coordinator.Example" tells the
-	// receiving server that we'd like to call
-	// the Example() method of struct Coordinator.
-	ok := call("Coordinator.Example", &args, &reply)
-	if ok {
-		// reply.Y should be 100.
-		fmt.Printf("reply.Y %v\n", reply.Y)
 	} else {
 		fmt.Printf("call failed!\n")
 	}

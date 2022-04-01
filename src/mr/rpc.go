@@ -23,19 +23,19 @@ const SHUTDOWN_TYPE = "SHUTDOWN"
 const WAIT_TYPE = "WAIT"
 
 type GetTasksReply struct {
-	task_type string, // Must be consistent with RPC server, 2 types: MAP_TYPE and REDUCE_TYPE
-	task_id int,       // (task_type, task_id) identifies a task
-	nReduce int,
-	nMap    int,      // WARNNING: this var can only be set when all map workers finished
+	Task_type string // Must be consistent with RPC server, 2 types: MAP_TYPE and REDUCE_TYPE
+	Task_id int       // (task_type, task_id) identifies a task
+	NReduce int
+	NMap    int      // WARNNING: this var can only be set when all map workers finished
                       // and only used by reduce task
                       // In this design, nMap can be simplified to Inpute file numbers
 
-	file_name string  // only used by map worker
+	File_name string  // only used by map worker
 }
 
 type TaskDoneArgs struct {
-	task_type string,
-	id int
+	Task_type string
+	Id int
 }
 
 type TaskDoneReply struct {
