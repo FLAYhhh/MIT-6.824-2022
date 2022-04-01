@@ -1,6 +1,7 @@
 package mr
 
-import "fmt"
+import "time"
+//import "fmt"
 import "log"
 import "net"
 import "os"
@@ -53,7 +54,7 @@ func (c *Coordinator) GetTasks(args *GetTasksArgs, reply *GetTasksReply) error {
 	reply.NMap = len(c.input_files)
 	reply.Task_type = WAIT_TYPE
 	if !c.start_reduce {  // alloc Map task
-		fmt.Println("Have unfinished Map task")
+		//fmt.Println("Have unfinished Map task")
 		c.map_alloc_mu.Lock()
 		defer c.map_alloc_mu.Unlock()
 
@@ -63,13 +64,26 @@ func (c *Coordinator) GetTasks(args *GetTasksArgs, reply *GetTasksReply) error {
 				reply.Task_id = i
 				reply.File_name = c.input_files[i]
 				c.map_alloc[i] = true
-				fmt.Printf("Alloc Map task: ID = %v, File_name = %v\n", i, reply.File_name)
+				// Fault Tolerance: if 10s later, c.map_done[i] is still false, make c.map_alloc[i] false
+				go func(c *Coordinator, i int) {
+					time.Sleep(10 * time.Second)
+
+					c.task_done_mu.Lock()
+					defer c.task_done_mu.Unlock()
+					if c.map_done[i] == false {
+						c.map_alloc_mu.Lock()
+						defer c.map_alloc_mu.Unlock()
+						c.map_alloc[i] = false
+					}
+				}(c, i)
+
+				//fmt.Printf("Alloc Map task: ID = %v, File_name = %v\n", i, reply.File_name)
 				break
 			}
 		}
 		// TODO: if map tasks are allocated
 	} else {  // alloc Reduce task
-		fmt.Println("Have unfinished Recuduce task")
+		// fmt.Println("Have unfinished Recuduce task")
 		c.reduce_alloc_mu.Lock()
 		defer c.reduce_alloc_mu.Unlock()
 
@@ -78,7 +92,18 @@ func (c *Coordinator) GetTasks(args *GetTasksArgs, reply *GetTasksReply) error {
 				reply.Task_type = REDUCE_TYPE
 				reply.Task_id = i
 				c.reduce_alloc[i] = true
-				fmt.Printf("Alloc Reduce task: ID = %v\n", i);
+				go func(c *Coordinator, i int) {
+					time.Sleep(10 * time.Second)
+
+					c.task_done_mu.Lock()
+					defer c.task_done_mu.Unlock()
+					if c.reduce_done[i] == false {
+						c.reduce_alloc_mu.Lock()
+						defer c.reduce_alloc_mu.Unlock()
+						c.reduce_alloc[i] = false
+					}
+				}(c, i)
+				//fmt.Printf("Alloc Reduce task: ID = %v\n", i);
 				break
 			}
 		}

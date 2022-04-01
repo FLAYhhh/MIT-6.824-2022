@@ -173,6 +173,8 @@ func CallGetTasks() GetTasksReply {
 	reply := GetTasksReply{}
 	ok := call("Coordinator.GetTasks", &args, &reply)
 	if ok {
+		// do not print
+		return reply
 		// reply.Y should be 100.
 		fmt.Printf("Get Task | type: %v", reply.Task_type)
 		if reply.Task_type == MAP_TYPE {
@@ -184,7 +186,6 @@ func CallGetTasks() GetTasksReply {
 			fmt.Printf("\nbye\n");
 		} else if reply.Task_type == WAIT_TYPE {
 			fmt.Printf("\nwait...\n");
-			// TODO: sleep
 		}
 	} else {
 		fmt.Printf("call failed!\n")
@@ -202,7 +203,7 @@ func CallTaskDone(task_info GetTasksReply) {
 
 	ok := call("Coordinator.TaskDone", &args, &reply)
 	if ok {
-		fmt.Printf("inform coordinator success\n")
+		//fmt.Printf("inform coordinator success\n")
 	} else {
 		fmt.Printf("call failed!\n")
 	}
